@@ -1,103 +1,80 @@
-; ===== Cursor と Chrome の位置・サイズを入れ替え (Ctrl+Alt+S)
-; 使用: Ctrl+Alt+S で Cursor と「一番大きい Chrome ウィンドウ」を入れ替え
-; 最大化中は一度通常サイズに戻してから移動
+; Cursor と Chrome を入れ替え (Ctrl+Alt+S)
+#Requires AutoHotkey v2.0
 
-#NoEnv
-#SingleInstance Force
-SendMode Input
-SetWorkingDir %A_ScriptDir%
+ToolTip "Swap loaded"
+SetTimer () => ToolTip(), -1500
 
-; 起動時メッセージ（半角英字）
-ToolTip, Swap screens loaded. Ctrl+Alt+S to swap Cursor and Chrome.
-SetTimer, RemoveStartupTip, 2500
-return
-
-^!s::
-	; Cursor ウィンドウを探す (ahk_exe で Cursor のプロセス)
-	cursorID := ""
-	WinGet, list, List
-	Loop, %list%
-	{
-		id := list%A_Index%
-		WinGet, proc, ProcessName, ahk_id %id%
-		WinGetTitle, title, ahk_id %id%
-		if (proc = "Cursor.exe" && title != "")
-		{
-			cursorID := id
-			break
+^!s:: {
+	; Cursor を探す
+	cursorID := 0
+	for id in WinGetList() {
+		try {
+			if (WinGetProcessName("ahk_id " id) = "Cursor.exe" && WinGetTitle("ahk_id " id) != "") {
+				cursorID := id
+				break
+			}
 		}
 	}
-	if (!cursorID)
-	{
-		ToolTip, Cursor が見つかりません
-		SetTimer, RemoveToolTip, 2000
-		return
-	}
-
-	; 一番大きい Chrome ウィンドウを探す
-	chromeID := ""
+	
+	; Chrome を探す
+	chromeID := 0
 	maxArea := 0
-	Loop, %list%
-	{
-		id := list%A_Index%
-		WinGet, proc, ProcessName, ahk_id %id%
-		WinGetTitle, title, ahk_id %id%
-		if (proc = "chrome.exe" && title != "")
-		{
-			WinGet, style, Style, ahk_id %id%
-			; 0x10000000 = WS_VISIBLE
-			if (style & 0x10000000)
-			{
-				WinGetPos, x, y, w, h, ahk_id %id%
-				area := w * h
-				if (area > maxArea)
-				{
-					maxArea := area
+	for id in WinGetList() {
+		try {
+			if (WinGetProcessName("ahk_id " id) = "chrome.exe" && WinGetTitle("ahk_id " id) != "") {
+				WinGetPos(&x, &y, &w, &h, "ahk_id " id)
+				if (w * h > maxArea) {
+					maxArea := w * h
 					chromeID := id
 				}
 			}
 		}
 	}
-	if (!chromeID)
-	{
-		ToolTip, Chrome が見つかりません
-		SetTimer, RemoveToolTip, 2000
+	
+	if (!cursorID || !chromeID)
 		return
-	}
-
-	; 最大化なら解除
-	WinGet, cursorMax, MinMax, ahk_id %cursorID%
-	WinGet, chromeMax, MinMax, ahk_id %chromeID%
-	if (cursorMax = 1)
-		WinRestore, ahk_id %cursorID%
-	if (chromeMax = 1)
-		WinRestore, ahk_id %chromeID%
-	Sleep, 50
-
-	; 位置・サイズ取得
-	WinGetPos, cx, cy, cw, ch, ahk_id %cursorID%
-	WinGetPos, gx, gy, gw, gh, ahk_id %chromeID%
-
-	; 入れ替え
-	WinMove, ahk_id %cursorID%, , %gx%, %gy%, %gw%, %gh%
-	WinMove, ahk_id %chromeID%, , %cx%, %cy%, %cw%, %ch%
-
-	; 元が最大化だったら入れ替え後も最大化
-	if (cursorMax = 1)
-		WinMaximize, ahk_id %cursorID%
-	if (chromeMax = 1)
-		WinMaximize, ahk_id %chromeID%
-
-	ToolTip, 入れ替えました
-	SetTimer, RemoveToolTip, 2000
-	return
-
-RemoveToolTip:
-	SetTimer, RemoveToolTip, Off
-	ToolTip
-	return
-
-RemoveStartupTip:
-	SetTimer, RemoveStartupTip, Off
-	ToolTip
-	return
+	
+	; どのモニターにいるか取得（最大化していても分かる）
+	cursorMon := DllCall("User32\MonitorFromWindow", "Ptr", cursorID, "UInt", 2, "Ptr")
+	chromeMon := DllCall("User32\MonitorFromWindow", "Ptr", chromeID, "UInt", 2, "Ptr")
+	
+	; 各モニターの作業領域を取得
+	mi1 := Buffer(40, 0)
+	NumPut("UInt", 40, mi1, 0)
+	DllCall("User32\GetMonitorInfo", "Ptr", cursorMon, "Ptr", mi1)
+	c_left := NumGet(mi1, 20, "Int")
+	c_top := NumGet(mi1, 24, "Int")
+	c_right := NumGet(mi1, 28, "Int")
+	c_bottom := NumGet(mi1, 32, "Int")
+	
+	mi2 := Buffer(40, 0)
+	NumPut("UInt", 40, mi2, 0)
+	DllCall("User32\GetMonitorInfo", "Ptr", chromeMon, "Ptr", mi2)
+	g_left := NumGet(mi2, 20, "Int")
+	g_top := NumGet(mi2, 24, "Int")
+	g_right := NumGet(mi2, 28, "Int")
+	g_bottom := NumGet(mi2, 32, "Int")
+	
+	; 最大化を記録
+	cMax := WinGetMinMax("ahk_id " cursorID)
+	gMax := WinGetMinMax("ahk_id " chromeID)
+	
+	; 復元
+	WinRestore "ahk_id " cursorID
+	WinRestore "ahk_id " chromeID
+	Sleep 50
+	
+	; モニター単位で移動
+	WinMove g_left, g_top, g_right - g_left, g_bottom - g_top, "ahk_id " cursorID
+	WinMove c_left, c_top, c_right - c_left, c_bottom - c_top, "ahk_id " chromeID
+	Sleep 50
+	
+	; 最大化を戻す
+	if (cMax = 1)
+		WinMaximize "ahk_id " cursorID
+	if (gMax = 1)
+		WinMaximize "ahk_id " chromeID
+	
+	ToolTip "Swapped"
+	SetTimer () => ToolTip(), -1000
+}
