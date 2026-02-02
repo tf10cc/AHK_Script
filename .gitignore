@@ -1,0 +1,11 @@
+# Cursor
+.cursor/
+
+# Untitled / temp
+Untitled
+Untitled*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
